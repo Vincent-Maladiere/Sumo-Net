@@ -7,10 +7,10 @@ warnings.simplefilter("ignore")
 from generate_job_parameters import load_obj
 
 pycox_local.pycox.datasets.support.read_df()
-pycox_local.pycox.datasets.flchain.read_df()
+#pycox_local.pycox.datasets.flchain.read_df()
 pycox_local.pycox.datasets.metabric.read_df()
 pycox_local.pycox.datasets.gbsg.read_df()
-pycox_local.pycox.datasets.kkbox.read_df()
+# pycox_local.pycox.datasets.kkbox.read_df()
 def job_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--job_path', type=str, nargs='?', default='', help='which dataset to run')
@@ -105,11 +105,11 @@ if __name__ == '__main__':
         'dataset_string': datasets[args['dataset']],
         'seed': args['seed'],
         'total_epochs': args['total_epochs'],
-        'device': device,
+        'device': "cpu", #device,
         'patience': args['patience'],
         'hyperits':  args['hyperits'],
         'selection_criteria': selection_criteria[args['selection_criteria']],
-        'grid_size':args['grid_size'],
+        'grid_size': args['grid_size'],
         'test_grid_size': args['test_grid_size'],
         'validation_interval': args['validation_interval'],
         'net_type': args['net_type'],
@@ -119,6 +119,7 @@ if __name__ == '__main__':
         'use_sotle': False
 
     }
+    print(job_params)
     training_obj = hyperopt_training(job_param=job_params,hyper_param_space=hyper_param_space)
     training_obj.run()
     training_obj.post_process()

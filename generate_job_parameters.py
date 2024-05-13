@@ -31,12 +31,12 @@ def generate_job_params(directory='job_dir'):
     base_dict = {
         'dataset': 0,
         'seed': 2,
-        'total_epochs': 100,
+        'total_epochs': 50,
         # 'total_epochs': 25,
         'patience': 20,
         'hyperits': 50,
 
-        'grid_size': 100,
+        'grid_size': 32,
         'test_grid_size': 100,
         'validation_interval': 4,
         'loss_type': 0,
@@ -47,9 +47,9 @@ def generate_job_params(directory='job_dir'):
         'use_sotle': False,
     }
     counter = 0
-    for seed in [1,2,1337,3,4]:
-        for fold_idx in [0,1,2,3,4]:
-            for dataset in [3]:
+    for seed in [5, 6, 7, 8]:
+        for fold_idx in [2]: #[0,1,2,3,4]:
+            for dataset in [1]:
             # for dataset in [0,1,2,3]:
                 for l_type in [0]:
                     for net_t,sel_crit in zip(nets,validate_on):
@@ -64,4 +64,4 @@ def generate_job_params(directory='job_dir'):
 
 if __name__ == '__main__':
         # generate_job_params(directory='testing')
-        generate_job_params(directory='sumo_net_flchain_1')
+        generate_job_params(directory='sumo_net_flchain_2')

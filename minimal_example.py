@@ -36,7 +36,7 @@ if __name__ == '__main__':
     #Optimization configuration
     wr=0.0
     lr=1e-2
-    device = 'cuda:0'
+    device = "cpu" #'cuda:0'
     epochs = 10
     optimizer = torch.optim.Adam(model.parameters(), lr=lr,
                                       weight_decay=wr)

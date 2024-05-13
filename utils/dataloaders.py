@@ -110,6 +110,25 @@ class survival_dataset(Dataset):
         else:
             self.event_col = data.col_event
             self.duration_col = data.col_duration
+        
+        # print("\nHazardous debug\n")
+        # from hazardous.data._competing_weibull import make_synthetic_competing_weibull
+        
+        # df_full, y = make_synthetic_competing_weibull(
+        #     n_events=1,
+        #     n_samples=100_000,
+        #     n_features=20,
+        #     complex_features=True,
+        #     return_X_y=True,
+        # )
+        # df_full = pd.concat([df_full, y], axis=1)
+        # print(f"Hazardous debug: {df_full.shape}")
+        # self.event_col = "event"
+        # self.duration_col = "duration"
+        # cat_cols = []
+        # cont_cols = df_full.columns.to_list()
+        # binary_cols = []
+
         print(f'{str_identifier} max',df_full[self.duration_col].max())
         print(f'{str_identifier} min',df_full[self.duration_col].min())
         c = OrderedCategoricalLong()

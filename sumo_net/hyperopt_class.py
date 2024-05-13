@@ -76,13 +76,13 @@ class hyperopt_training():
         self.net_type = job_param['net_type']
         self.fold_idx = job_param['fold_idx']
         self.savedir = job_param['savedir']
-        self.chunks = job_param['chunks']
-        self.max_series_accumulation = job_param['max_series_accumulation']
-        self.validate_train = job_param['validate_train']
+        self.chunks = 50 #job_param['chunks']
+        self.max_series_accumulation = 50000 # job_param['max_series_accumulation']
+        self.validate_train = False #job_param['validate_train']
         self.global_hyperit = 0
         self.best = np.inf
         self.debug = False
-        torch.cuda.set_device(self.device)
+        #torch.cuda.set_device(self.device)
         self.custom_dataloader = custom_dataloader
         self.save_path = f'{self.savedir}/{self.dataset_string}_seed={self.seed}_fold_idx={self.fold_idx}_objective={self.objective}_{self.net_type}/'
         if not os.path.exists(self.save_path):
@@ -491,7 +491,7 @@ class hyperopt_training():
                 return True
         return False
 
-    def eval_loop(self,grid_size,chunks=50,max_series_accumulation=50000):
+    def eval_loop(self,grid_size,chunks=50,max_series_accumulation=50000, is_test=False):
         self.model.eval()
         S_series_container = []
         S_log = []
@@ -558,7 +558,58 @@ class hyperopt_training():
         S_series_container = pd.DataFrame(torch.cat(S_series_container,1).numpy())
         t_grid_np = self.dataloader.dataset.invert_duration(t_grid_np.reshape(-1, 1)).squeeze()
         S_series_container=S_series_container.set_index(t_grid_np)
+
+        if is_test:
+
+            event_train, duration_train = [], []
+            self.dataloader.dataset.set(mode='train')
+            for (_, _, y, delta) in self.dataloader:                
+                duration_train.append(y.detach().numpy())
+                event_train.append(delta.detach().numpy().ravel())
+            
+            duration_train = self.dataloader.dataset.invert_duration(
+                np.concatenate(duration_train)
+            ).squeeze()
+            
+            y_train = pd.DataFrame(
+                dict(
+                    event=np.hstack(event_train),
+                    duration=np.array(duration_train).ravel(),
+                )
+            )
+            print(y_train)
+        
+            from hazardous.metrics._brier_score import integrated_brier_score_survival
+
+            y_test = pd.DataFrame(
+                dict(
+                    event=events,
+                    duration=np.array(durations), 
+                )
+            )
+            y_pred = S_series_container.values.T
+            print(y_pred)
+            print(y_pred.shape)
+
+            ibs = integrated_brier_score_survival(
+                y_train, y_test, y_pred, t_grid_np   
+            )
+            print(f"Hazardous ibs {ibs}")
+
+            yana = yana_loss(
+                y_pred, y_test["duration"], y_test["event"], t_grid_np
+            )
+            print(f"Hazardous Yana {yana}")
+
+            c_indexes = get_c_index(y_train, y_test, y_pred, t_grid_np)
+            c_indexes = 1 - np.array(c_indexes)
+            print(f"Hazardous C-index :{c_indexes}")
+
+            self.dataloader.dataset.set(mode='test')
+
+
         val_likelihood,conc,ibs,inll = self.calc_eval_objective(S_log, f_log,S_series_container,durations=durations,events=events,time_grid=t_grid_np)
+
         self.model.train()
         return [val_likelihood.item(),val_likelihood.item()],conc,ibs,inll
 
@@ -571,7 +622,7 @@ class hyperopt_training():
 
     def test_score(self):
         self.dataloader.dataset.set(mode='test')
-        return self.eval_loop(self.grid_size)
+        return self.eval_loop(self.grid_size, is_test=True)
     def dump_model(self):
         torch.save(self.model.state_dict(), self.save_path + f'best_model_{self.global_hyperit}.pt')
 
@@ -639,13 +690,17 @@ class hyperopt_training():
         if os.path.exists(self.save_path + 'hyperopt_database.p'):
             return
         trials = Trials()
+        from time import time
+        tic = time()
         best = fmin(fn=self,
                     space=self.hyperparameter_space,
                     algo=tpe.suggest,
-                    max_evals=self.hyperits,
+                    max_evals=1, #self.hyperits,
                     trials=trials,
                     verbose=True)
         print(space_eval(self.hyperparameter_space, best))
+        toc = time()
+        print(f"Hazardous debug time: {toc - tic:.2f}s")
         pickle.dump(trials,
                     open(self.save_path + 'hyperopt_database.p',
                          "wb"))
@@ -673,20 +728,51 @@ class hyperopt_training():
         df.to_csv(self.save_path+'best_results.csv',index_label=False)
 
 
+def yana_loss(pred, duration, event, time_grid, espilon=1e-5):
+    loss = 0
+    for idx_time in range(len(time_grid) - 1):
+        lower_time = time_grid[idx_time]
+        upper_time = time_grid[idx_time + 1]
+        mask = (lower_time < duration) & (duration <= upper_time)
+        mask = mask.values
+        f = pred[:, idx_time + 1] - pred[:, idx_time]
+        loss -= (event * np.log(f + espilon))[mask].sum()
+        loss -= ((1 - event) * np.log(1 - pred[:, idx_time + 1] + espilon))[
+            mask
+        ].sum()
+    return loss / pred.shape[0]
 
 
+def get_c_index(y_train, y_test, y_pred, time_grid):
+    from sksurv.metrics import concordance_index_ipcw
+
+    print(y_train["duration"].max())
+    print(y_test["duration"].max())
+    print(time_grid.max())
+
+    et_train = make_recarray(y_train)
+    et_test = make_recarray(y_test)
+
+    c_indexes = []
+    
+    for time_idx in [8, 16, 24]:
+        y_pred_at_t = y_pred[:, time_idx]
+        tau = time_grid[time_idx]
+        ct_index, _, _, _, _ = concordance_index_ipcw(
+            et_train,
+            et_test,
+            y_pred_at_t,
+            tau=tau,
+        )
+        c_indexes.append(round(ct_index, 3))
+    
+    return c_indexes
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+def make_recarray(y):
+    event = y["event"]
+    duration = y["duration"]
+    return np.array(
+        [(event[i], duration[i]) for i in range(y.shape[0])],
+        dtype=[("e", bool), ("t", float)],
+    )
