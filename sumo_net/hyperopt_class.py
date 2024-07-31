@@ -429,11 +429,11 @@ class hyperopt_training():
             criteria = ibs  # minimize
         elif self.selection_criteria == 'inll':
             criteria = ibll  # "minimize"
-        print(f'total_loss: {training_loss} likelihood: {likelihood} reg_loss: {reg_loss}')
+        #print(f'total_loss: {training_loss} likelihood: {likelihood} reg_loss: {reg_loss}')
         if self.validate_train:
             tr_likelihood, tr_conc, tr_ibs, tr_ibll = self.train_score()
-            print(f'tr_likelihood: {tr_likelihood[0]} tr_likelihood: {tr_likelihood[1]} tr_conc: {tr_conc} tr_ibs: {tr_ibs}  tr_ibll: {tr_ibll}')
-        print(f'criteria score: {criteria} val likelihood: {val_likelihood[0]} val likelihood: {val_likelihood[1]} val conc:{conc} val ibs: {ibs} val inll {ibll}')
+            #print(f'tr_likelihood: {tr_likelihood[0]} tr_likelihood: {tr_likelihood[1]} tr_conc: {tr_conc} tr_ibs: {tr_ibs}  tr_ibll: {tr_ibll}')
+        #print(f'criteria score: {criteria} val likelihood: {val_likelihood[0]} val likelihood: {val_likelihood[1]} val conc:{conc} val ibs: {ibs} val inll {ibll}')
         return criteria
 
 
@@ -577,9 +577,12 @@ class hyperopt_training():
                     duration=np.array(duration_train).ravel(),
                 )
             )
-            print(y_train)
+            print(f"{y_train.head()=}")
         
-            from hazardous.metrics._brier_score import integrated_brier_score_survival
+            # Brier scores
+            from hazardous.metrics._brier_score import (
+                integrated_brier_score_survival, brier_score_survival
+            )
 
             y_test = pd.DataFrame(
                 dict(
@@ -587,23 +590,91 @@ class hyperopt_training():
                     duration=np.array(durations), 
                 )
             )
-            y_pred = S_series_container.values.T
-            print(y_pred)
-            print(y_pred.shape)
+            y_surv = S_series_container.values.T
+            y_surv = y_surv[None, :, :]
+            y_pred = 1 - y_surv
+            y_pred = np.concatenate([y_surv, y_pred], axis=0).astype("float64")
 
+            print(f"{y_pred[:5]=}")
+            print(f"{y_pred.shape=}")
+
+            event_id = 1
             ibs = integrated_brier_score_survival(
-                y_train, y_test, y_pred, t_grid_np   
+                y_train, y_test, y_pred[0], t_grid_np   
             )
-            print(f"Hazardous ibs {ibs}")
+            brier_scores = brier_score_survival(
+                y_train, y_test, y_pred[0], t_grid_np   
+            )
+            print(f"{ibs=}")
+            print(f"{brier_scores=}")
+            
+            event_specific_ibs = [{
+                "event": event_id,
+                "ibs": round(ibs, 4),
+            }]
+            event_specific_brier_scores = [{
+                "event": event_id,
+                "time": list(t_grid_np.round(2)),
+                "brier_score": list(brier_scores.round(4)),
+            }]
 
-            yana = yana_loss(
+
+            # Cens-log
+            from hazardous.metrics._yana import CensoredNegativeLogLikelihoodSimple
+            
+            censlog = CensoredNegativeLogLikelihoodSimple().loss(
                 y_pred, y_test["duration"], y_test["event"], t_grid_np
             )
-            print(f"Hazardous Yana {yana}")
+            print(f"{censlog=}")
 
-            c_indexes = get_c_index(y_train, y_test, y_pred, t_grid_np)
-            c_indexes = 1 - np.array(c_indexes)
-            print(f"Hazardous C-index :{c_indexes}")
+            # C-index
+            horizons = [.25, .50, .75]
+            c_indexes = get_c_index(y_train, y_test, y_pred[event_id], t_grid_np, horizons)
+            #c_indexes = 1 - np.array(c_indexes)
+            print(f"{c_indexes=}")
+            event_specific_c_index = [
+                {
+                    "event": event_id,
+                    "time_quantile": horizons,
+                    "c_index": c_indexes,
+                }
+            ]
+
+            import json
+            from pathlib import Path
+
+            model_name = f"sumonet"
+            scores = {
+                "is_competing_risk": False,
+                "n_events": 1,
+                "model_name": model_name,
+                "dataset_name": self.dataset_string,
+                "n_rows": y_train.shape[0],
+                "n_cols": 0,
+                "censoring_rate": y_train["event"].astype("float64").mean().round(4),
+                "random_state": int(self.seed),
+                "time_grid": np.asarray(t_grid_np, dtype="float64").tolist(),
+                "y_pred": np.asarray(y_pred, dtype="float64").tolist(),
+                "predict_time": 0,
+                "event_specific_ibs": event_specific_ibs,
+                "event_specific_brier_scores": event_specific_brier_scores,
+                "event_specific_c_index": event_specific_c_index,
+                "censlog": censlog,
+                "fit_time": self.fit_time,
+            }
+
+            path_dir = Path("../benchmark/scores") / "raw" / model_name
+            path_dir.mkdir(parents=True, exist_ok=True)
+            path_file = path_dir / f"{self.dataset_string}.json"
+
+            if path_file.exists():
+                all_scores = json.load(open(path_file))
+            else:
+                all_scores = []
+
+            all_scores.append(scores)
+            json.dump(all_scores, open(path_file, "w"))
+            print(f"Wrote {path_file}")
 
             self.dataloader.dataset.set(mode='test')
 
@@ -631,6 +702,8 @@ class hyperopt_training():
 
     def full_loop(self):
         self.counter = 0
+        from time import time
+        tic = time()
         if self.debug:
             self.writer =SummaryWriter()
             self.debug_list = []
@@ -639,6 +712,7 @@ class hyperopt_training():
                 break
         if self.debug:
             print(f'best test ibs {min(self.debug_list)}')
+        self.fit_time = time() - tic
         self.load_model()
         val_likelihood,val_conc,val_ibs,val_inll = self.validation_score()
         test_likelihood,test_conc,test_ibs,test_inll = self.test_score()
@@ -728,22 +802,7 @@ class hyperopt_training():
         df.to_csv(self.save_path+'best_results.csv',index_label=False)
 
 
-def yana_loss(pred, duration, event, time_grid, espilon=1e-5):
-    loss = 0
-    for idx_time in range(len(time_grid) - 1):
-        lower_time = time_grid[idx_time]
-        upper_time = time_grid[idx_time + 1]
-        mask = (lower_time < duration) & (duration <= upper_time)
-        mask = mask.values
-        f = pred[:, idx_time + 1] - pred[:, idx_time]
-        loss -= (event * np.log(f + espilon))[mask].sum()
-        loss -= ((1 - event) * np.log(1 - pred[:, idx_time + 1] + espilon))[
-            mask
-        ].sum()
-    return loss / pred.shape[0]
-
-
-def get_c_index(y_train, y_test, y_pred, time_grid):
+def get_c_index(y_train, y_test, y_pred, time_grid, horizons):
     from sksurv.metrics import concordance_index_ipcw
 
     print(y_train["duration"].max())
@@ -753,11 +812,12 @@ def get_c_index(y_train, y_test, y_pred, time_grid):
     et_train = make_recarray(y_train)
     et_test = make_recarray(y_test)
 
-    c_indexes = []
+    taus = np.quantile(time_grid, horizons)
     
-    for time_idx in [8, 16, 24]:
-        y_pred_at_t = y_pred[:, time_idx]
-        tau = time_grid[time_idx]
+    c_indexes = []
+    for tau in taus:
+        idx_tau = np.searchsorted(time_grid, tau)
+        y_pred_at_t = y_pred[:, idx_tau]
         ct_index, _, _, _, _ = concordance_index_ipcw(
             et_train,
             et_test,

@@ -1,3 +1,4 @@
+# %%
 import os
 import shutil
 import pickle
@@ -22,7 +23,8 @@ def load_obj(name,folder):
 
 nets = ['survival_net_basic']
 validate_on = [0]
-def generate_job_params(directory='job_dir'):
+
+def generate_job_params(dataset, directory='job_dir'):
     if not os.path.exists(directory):
         os.makedirs(directory)
     else:
@@ -47,21 +49,23 @@ def generate_job_params(directory='job_dir'):
         'use_sotle': False,
     }
     counter = 0
-    for seed in [5, 6, 7, 8]:
-        for fold_idx in [2]: #[0,1,2,3,4]:
-            for dataset in [1]:
-            # for dataset in [0,1,2,3]:
-                for l_type in [0]:
-                    for net_t,sel_crit in zip(nets,validate_on):
-                        base_dict['dataset']=dataset
-                        base_dict['loss_type']=l_type
-                        base_dict['net_type']=net_t
-                        base_dict['fold_idx']=fold_idx
-                        base_dict['selection_criteria'] = sel_crit
-                        base_dict['seed']=seed
-                        save_obj(base_dict,f'job_{counter}',directory+'/')
-                        counter +=1
+    for seed in range(5):
+        for fold_idx in [0]: #[0,1,2,3,4]:
+            for l_type in [0]:
+                for net_t,sel_crit in zip(nets,validate_on):
+                    base_dict['dataset']=dataset
+                    base_dict['loss_type']=l_type
+                    base_dict['net_type']=net_t
+                    base_dict['fold_idx']=fold_idx
+                    base_dict['selection_criteria'] = sel_crit
+                    base_dict['seed']=seed
+                    save_obj(base_dict,f'job_{counter}',directory+'/')
+                    counter +=1
+
+# %%
 
 if __name__ == '__main__':
-        # generate_job_params(directory='testing')
-        generate_job_params(directory='sumo_net_flchain_2')
+    generate_job_params(dataset=0, directory='support_params')
+    generate_job_params(dataset=1, directory='metabric_params')
+
+# %%

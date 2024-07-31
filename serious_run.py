@@ -14,7 +14,7 @@ pycox_local.pycox.datasets.gbsg.read_df()
 def job_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--job_path', type=str, nargs='?', default='', help='which dataset to run')
-    parser.add_argument('--idx', type=int, nargs='?', default=-1, help='which dataset to run')
+    parser.add_argument('--random_state', type=int, nargs='?', default=-1, help='which dataset to run')
     # parser.add_argument('--dataset', type=int, nargs='?', default=-1, help='which dataset to run')
     # parser.add_argument('--seed', type=int, nargs='?', help='selects the seed to split the data on')
     # parser.add_argument('--eval_metric', type=int, nargs='?', default=0, help='which evaluation metric to use')
@@ -45,7 +45,7 @@ selection_criteria = ['train','concordance','ibs','inll','likelihood']
 if __name__ == '__main__':
     input_args = vars(job_parser().parse_args())
     fold = input_args['job_path']
-    idx = input_args['idx']
+    idx = input_args['random_state']
     jobs = os.listdir(fold)
     jobs.sort()
     args = load_obj(jobs[idx],folder=f'{fold}/')
