@@ -91,6 +91,7 @@ class hyperopt_training():
         self.hyperopt_params = ['bounding_op', 'transformation', 'depth_x', 'width_x','depth_t', 'width_t', 'depth', 'width', 'bs', 'lr','direct_dif','dropout','eps','weight_decay']
         self.deephit_params= ['alpha','sigma','num_dur']
         self.get_hyperparameterspace(hyper_param_space)
+        self.hyper_param_space = hyper_param_space
 
     def calc_eval_objective(self,S,f,S_extended,durations,events,time_grid):
         val_likelihood = self.train_objective(S,f)
@@ -640,6 +641,35 @@ class hyperopt_training():
                 }
             ]
 
+            # MSE, MAE and calibration
+            from SurvivalEVAL import SurvivalEvaluator
+
+            time_grid = time_grid.ravel().numpy()
+
+            print(
+                f"{y_pred.shape=}",
+                f"{time_grid.shape=}",
+                f"{y_test.shape=}",
+                f"{y_train.shape=}",
+            )
+
+            evaluator = SurvivalEvaluator(
+                predicted_survival_curves=y_pred[0, :, :],
+                time_coordinates=time_grid,
+                test_event_indicators=y_test["event"].to_numpy(),
+                test_event_times=y_test["duration"].to_numpy(),
+                train_event_indicators=y_train["event"].to_numpy(),
+                train_event_times=y_train["duration"].to_numpy(),
+            )
+            mse = evaluator.mse(method="Pseudo_obs")
+            mae = evaluator.mae(method="Pseudo_obs")
+            auc = evaluator.auc()
+            target_time = float(time_grid[len(time_grid) // 2])
+            one_calibration = evaluator.one_calibration(target_time)[0]
+            d_calibration = evaluator.d_calibration()[0]
+            km_calibration = evaluator.km_calibration()
+            x_calibration = evaluator.x_calibration()
+
             import json
             from pathlib import Path
 
@@ -660,6 +690,13 @@ class hyperopt_training():
                 "event_specific_brier_scores": event_specific_brier_scores,
                 "event_specific_c_index": event_specific_c_index,
                 "censlog": censlog,
+                "mse": mse,
+                "mae": mae,
+                "auc": auc,
+                "one_calibration": one_calibration,
+                "d_calibration": d_calibration,
+                "km_calibration": km_calibration,
+                "x_calibration": x_calibration,
                 "fit_time": self.fit_time,
             }
 
@@ -766,13 +803,16 @@ class hyperopt_training():
         trials = Trials()
         from time import time
         tic = time()
-        best = fmin(fn=self,
-                    space=self.hyperparameter_space,
-                    algo=tpe.suggest,
-                    max_evals=1, #self.hyperits,
-                    trials=trials,
-                    verbose=True)
-        print(space_eval(self.hyperparameter_space, best))
+        from sklearn.model_selection import ParameterGrid
+        params = ParameterGrid(self.hyper_param_space)[0]
+        self(params)
+        # best = fmin(fn=self,
+        #             space=self.hyperparameter_space,
+        #             algo=tpe.suggest,
+        #             max_evals=1, #self.hyperits,
+        #             trials=trials,
+        #             verbose=True)
+        # print(space_eval(self.hyperparameter_space, best))
         toc = time()
         print(f"Hazardous debug time: {toc - tic:.2f}s")
         pickle.dump(trials,
